@@ -1,0 +1,434 @@
+---
+title: "Kaggle Competition"
+author: "Yuri Almeida Cunha"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r include=FALSE}
+
+# Clear memory
+rm(list = ls())
+
+# Library
+
+library(tidyverse)
+library(data.table)
+library(ggplot2)
+library(caret)
+library(knitr)
+library(lubridate)
+library(plyr)
+library(party)
+library(pROC)
+library(ranger)
+library(psych)
+library(keras)
+
+# Set seed
+
+my_seed <- 28081992
+
+```
+
+# The Dataset
+
+The dataset used for our Kaggle competition is a large matrix with 60 columns separated into a train and test data frames with around 27k and 12k observations, respectively, with a heterogeneous set of features about articles published by Mashable in a period of two years. The articles were published by Mashable (www.mashable.com) and their content as the rights to reproduce it belongs to them. 
+Hence, this dataset does not share the original content but some statistics associated with it. Acquisition date: January 8, 2015.
+
+# The Competition
+
+The idea of this competition is to develop, train and test a few predictive models for the articles and define the most popular ones based on sharing indicators measured in the social networks.
+
+# The Data Cleanning
+
+One of the most important parts of the predictive model process, if not the most, is to have a "clean" dataset where the main metrics and features are captured. Due to the short period of time, the unknown process of collecting the information related to the model and the lack of knowledge related the business area, I have decided to exclude only a single observation that seemed extraordinary from the column n_unique_tokens and focus my efforts into training and tuning the predictive models.
+The code bellow describe the process of analysing, loading and filtering the dataset for the models that used "caret" package. 
+
+```{r echo=FALSE, message=FALSE, comment=FALSE, warning=FALSE}
+
+# Data Check: Missing Values / Explanatory Variables Distribution 
+
+data_train <- read_csv("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/data/train.csv")
+data_test <- read_csv("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/data/test.csv")
+
+# Check data structure and distribuitions
+# skimr::skim(data_train)
+# str(data_train)
+
+# Example of the first 8 columns (Did it for the entire dataset)
+ggplot(gather(data_train[, c(1:8)], cols, value), aes(value)) +
+  geom_histogram() +
+  facet_wrap(.~cols, scales = "free")
+
+
+# Some outlier that need to be eliminated
+
+# check graphs for the distribution difference
+
+# Inital Graph = hist(data_train$n_unique_tokens)
+
+data_train <- data_train %>% 
+  filter(n_unique_tokens <=1)
+
+# Final Graph = hist(data_train$n_unique_tokens)
+
+data_train$is_popular <- factor(data_train$is_popular, level = c(1,0), labels = c("Yes","No"))
+
+# Remove article_id from the predictions
+data_train$article_id <- NULL
+
+```
+
+After a quick analysis into the train dataset, no missing values were found from any of the columns. This is really good for better accuracy of the model predictions. All the 60 columns are numeric ones with a few explanatory variables that could be transformed into factors. Although this transformations could be possible, I have decided not to make them because in most of my models those features are going to be scaled. 
+
+```{r, results='hide'}
+
+# create Function to submit the files: caret
+
+submit_files_caret <- function(model){
+  
+  to_submit <- data.table(
+    article_id = data_test$article_id,
+    score = predict(object = model, newdata = data_test, type = 'prob')[1])
+  
+  colnames(to_submit) <- c("article_id", "score")
+  
+  write.csv(to_submit, paste0("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/submissions/",substitute(model),".csv"), row.names=FALSE)
+  
+  save(model, file = paste0("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/models/",substitute(model),".RData"))
+  
+}
+
+```
+
+The second stage of the competition was to create a function to upload the predictions into Kaggle. I have created two of those functions, one for the models using the "caret" package and the other one for the "keras" . The code above illustrates the one used for the "caret" ones.
+
+# The Models
+
+Important: All the models were simply "loaded" in the Rmarkdown in order to be able to Knit them faster. Some of them take a quite long time to run. 
+
+## Linear Models
+
+```{r}
+
+# 1st Model - Elastic Net
+
+# fitControl <- trainControl(method = "repeatedcv", 
+                           # number = 5,
+                           # repeats = 5,
+                           # classProbs = TRUE, 
+                           # summaryFunction = twoClassSummary,
+                           # savePredictions = FALSE)
+
+# elastic_net <- train(
+  # is_popular~.,
+  # data = data_train,
+  # method="glmnet",
+  # preProcess=c("center", "scale"),
+  # trControl=fitControl,
+  # metric = 'ROC',
+  # seed = my_seed)
+
+# submit_files_caret(elastic_net)
+
+load("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/models/elastic_net.RData")
+
+# 2nd Model - Elastic Net with PCA
+
+
+# fitControl <- trainControl(method = "repeatedcv", 
+                                      #  number = 10,
+                                      # repeats = 10,
+                                  # classProbs = TRUE, 
+                  # summaryFunction = twoClassSummary,
+                          # savePredictions = FALSE)
+
+# elastic_net_pca <- train(
+      # is_popular~.,
+      # data = data_train,
+      # method="glmnet",
+      # preProcess=c("center", "scale", "pca"),
+      # trControl=fitControl,
+      # metric = 'ROC',
+      # seed = my_seed)
+
+# submit_files_caret(elastic_net_pca)
+
+load("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/models/elastic_net_pca.RData")
+
+```
+
+The first models I have decided to run were the linear models. Above, you can see the examples of 2 of them (I haven't added all the tests I made). I chose directly the Elastic Net models more specifically due to their capability of penalize through alpha and lambda parameters the coefficients of my logistic regression. I let the system to automatically "tune" those parameters for me whileI was choosing to bootstramp and cross-validated the datasets to achieve possibly better results and avoid overfitting.  
+The results obtained from those models were pretty satisfactory with an obvious advantage for the second one, where the number of cross-validation folders and bootstramps were bigger (less possibility of overfitting) and where the "pca" pre-process was chosen (leaving only the main components of the regression) improving slightly the accuracy of the model.
+
+
+## Random Forest Models
+
+```{r}
+
+# train_control <- trainControl(
+  # method = "cv",
+  # n = 5,
+  # classProbs = TRUE, 
+  # summaryFunction = twoClassSummary,
+  # savePredictions = FALSE)
+
+# tune_grid <- expand.grid(
+  # .mtry = c(2,3,4,5),
+  # .splitrule = "gini",
+  # .min.node.size = c(5, 10, 20))
+
+# random_forest <- train(is_popular~ .,
+                  # data = data_train,
+                  # method = "ranger",
+                  # trControl = train_control,
+                  # tuneGrid = tune_grid,
+                  # The ’impurity’ measure is the Gini index for classification
+                  # importance = "impurity",
+                  # seed = my_seed)
+
+# submit_files_caret(random_forest)
+
+load("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/models/random_forest.RData")
+
+# train_control <- trainControl(
+  # method = "cv",
+  # n = 10,
+  # classProbs = TRUE, 
+  # summaryFunction = twoClassSummary,
+  # savePredictions = FALSE)
+
+# tune_grid <- expand.grid(
+  # .mtry = c(2,3,4,5),
+  # .splitrule = "gini",
+  # .min.node.size = c(2,3,5,7))
+
+# random_forest_lower <- train(is_popular~ .,
+                  # data = data_train,
+                  # method = "ranger",
+                  # trControl = train_control,
+                  # tuneGrid = tune_grid,
+                  # The ’impurity’ measure is the Gini index for classification
+                  # importance = "impurity",
+                  # seed = my_seed)
+
+# submit_files_caret(random_forest_lower)
+
+load("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/models/random_forest_lower.RData")
+
+```
+
+For the random forest models, I have decided to tune the parameters myself. In both models, the results obtained were better than the initial ones obtained by the linear models. Due to the huge amount of the data, the strategy was to reduce the amount of variables selected (mtry) to have a better fit of the dataset and also lower, from one model to the other, the min.node.size while I increase the number of cross-validation folders. This strategy allowed me to have a better prediction of the dataset, while reducing my possibilities of overfitting. The model with lower node values perfomed better than the initial one, confirming the success of the strategy applied. 
+
+## XGBoost
+
+The results obtained by the random forest models weren't bad, however the improvements achieved from one to the other weren't that significant. With that, I came to a decision to use a more robust tree model in order to upgrade my accuracy results, the XGBoost. 
+Those XGBoost models bellow ended up having the best prediction accuracies between the whole set of models created into this competition (it's important to mention that I only left the 2 best ones):
+
+```{r}
+
+## THE CHAMP
+
+# XGBoost
+
+# train_control <- trainControl(
+  # method = "cv",
+  # n = 10,
+  # classProbs = TRUE, 
+  # summaryFunction = twoClassSummary,
+  # savePredictions = FALSE)
+
+
+# xgb_grid <- expand.grid(nrounds = 700,
+                        # max_depth = c(2,4,5,7,9),
+                        # eta = c(0.005, 0.01),
+                        # gamma = 0.001,
+                        # colsample_bytree = c(0.3, 0.5, 0.7),
+                        # min_child_weight = 1, # similar to n.minobsinnode
+                        # subsample = c(0.7))
+
+# xgboost_champ <- train(is_popular ~ .,
+                    # method = "xgbTree",
+                    # data = data_train,
+                    # trControl = train_control,
+                    # tuneGrid = xgb_grid,
+                    # seed = my_seed)
+
+# submit_files_caret(xgboost_champ)
+
+load("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/models/xgboost_champ.RData")
+
+# XGBoost 
+
+# train_control <- trainControl(
+  # method = "cv",
+  # n = 5,
+  # classProbs = TRUE, 
+  # summaryFunction = twoClassSummary,
+  # savePredictions = FALSE)
+
+
+# xgb_grid <- expand.grid(nrounds = 700,
+                        # max_depth = c(2,4,5,7,9),
+                        # eta = c(0.005, 0.01),
+                        # gamma = 0.001,
+                        # colsample_bytree = c(0.3, 0.5, 0.7),
+                        # min_child_weight = 1, # similar to n.minobsinnode
+                        # subsample = c(0.7))
+
+# xgboost_champ2 <- train(is_popular ~ .,
+                      # method = "xgbTree",
+                      # data = data_train,
+                      # trControl = train_control,
+                      # tuneGrid = xgb_grid,
+                      # seed = my_seed)
+
+load("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/models/xgboost_champ.RData")
+
+# submit_files_caret(xgboost_champ2)
+
+# nrounds: max number of boosting iterations
+# max_depth: maximum depth of a tree
+# eta: control the learning rate (Lower value / Larger value for nrounds - Less overfitting): Default: 0.3 
+# gamma: minimum loss reduction required to make a further partition on a leaf node of the tree. (Higher Value, + conservative)
+# colsample_bytree: subsample ratio of columns when constructing each tree.
+# min_child_weight: minimum sum of instance weight (hessian) needed in a child. (Higher Value, + conservative)
+# subsample: subsample ratio of the training instance. 
+# Setting it to 0.5 means that xgboost randomly collected half of the data instances to grow trees and this will prevent overfitting.
+
+
+```
+
+Based on the results presented on the Random Forest models, I wanted to make a really robust and computational consuming XGBoost models. With that in my thoughts, I lowered significantly the eta and the max_depth values, increasing the number of rounds and the subsample rate (70%) trying to avoid this way to overfit the train dataset. 
+The idea winded up achieving the best accuracy of all my model results, however on the second one I reduced the number of cross-validation folders from 10 to 5 and the results showed worse than the first case scenario, probably "overfitting" more the train dataset due to the reduction of the cuts.
+
+## Neural Networks
+
+For the neuralnetworks, I chose to use the package "Keras". In order make it more easier to code and re-scale the dataset, I reloaded the data and changed a bit their names, adding also a new submit file function:
+
+```{r, results='hide'}
+
+x_train <- read_csv("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/data/train.csv")
+x_valid <- read_csv("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/data/test.csv")
+
+
+submit_files_keras <- function(model){
+  
+  to_submit <- data.table(article_id = y_valid,
+                          preds = model %>% predict_proba(x_valid))
+  
+  to_submit <- to_submit[, c(1,3)]
+  
+  colnames(to_submit) <- c("article_id", "score")
+  
+  write.csv(to_submit, paste0("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/submissions/",substitute(model),".csv"), row.names=FALSE)
+  
+  save(model, file = paste0("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/models/",substitute(model),".RData"))
+  
+}
+
+
+# Scale the data before doing anything
+
+y_train <- to_categorical(x_train$is_popular)
+
+# Transform Datasets
+x_train <- x_train %>%
+                     select(-c("is_popular","article_id")) %>% 
+                     filter(n_unique_tokens <=1) %>% 
+                     scale()
+
+y_valid <- x_valid$article_id
+
+x_valid <- x_valid %>%
+          select(-c("article_id")) %>% 
+          filter(n_unique_tokens <=1) %>% 
+          scale()  
+
+```
+
+Bellow you can see the neural network models used and their codes:
+
+```{r}
+
+# Neural Network - 1 Relu
+
+# set.seed(my_seed)
+# neuralnet_ReLu <- keras_model_sequential()
+# neuralnet_ReLu %>%
+# layer_dense(units = 300, activation = 'relu', input_shape = ncol(x_train)) %>%
+# layer_dropout(rate = 0.4) %>%
+# layer_dense(units = 2, activation = 'sigmoid')
+
+# compile(
+# neuralnet_ReLu,
+# loss = 'binary_crossentropy',
+# optimizer = 'adam',
+# metrics = c('accuracy'))
+
+# history <- fit(
+# neuralnet_ReLu, 
+# x_train, y_train,
+# epochs = 50,
+# batch_size = 250,
+# validation_split = 0.5)
+
+# submit_files_keras(neuralnet_ReLu)
+
+
+load("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/models/neuralnet_ReLu.RData")
+
+# Neural Network - 2 Relus
+
+# set.seed(my_seed)
+# neuralnet_ReLu_2 <- keras_model_sequential()
+# neuralnet_ReLu_2 %>%
+# layer_dense(units = 300, activation = 'relu', input_shape = ncol(x_train)) %>%
+# layer_dropout(rate = 0.4) %>%
+# layer_dense(units = 300, activation = 'relu') %>%
+# layer_dropout(rate = 0.4) %>%
+# layer_dense(units = 2, activation = 'sigmoid')
+
+# compile(
+# neuralnet_ReLu_2,
+# loss = 'binary_crossentropy',
+# optimizer = 'adam',
+# metrics = c('accuracy'))
+
+# Add the data
+
+# history <- fit(
+  # neuralnet_ReLu_2, 
+  # x_train, y_train,
+  # epochs = 50,
+  # batch_size = 250,
+  # validation_split = 0.5)
+
+
+# submit_files_keras(neuralnet_ReLu_2)
+
+load("D:/CEU/Data_Science_2/DS2_Yuri/Kaggle_Competition/models/neuralnet_ReLu_2.RData")
+
+```
+
+
+Surprisingly, the neural network models didn't perform well. I have tried some set of combinations (increasing the number of layers, units in each layer, number of epochs, batch_size and even changing the validation_split). None of those seems to work better than the simplicity, in terms of accuracy, presented under the tree models. My "guess" is that the observations inside the following dataset are really discrepant from each other, making difficult even for a computer "learn" from even a reasonable amount of batch size.
+
+# Conclusion
+
+At the end of this competition/experiment, I could figure out two important aspects. 
+The first one is related to the quality of the dataset and the cleaning imposed into it. No matter how much I have tried to "tune" my parameters, experiment different models or even bootstramp my dataset many times the accuracy of the results didn't have a "significant" improvement. 
+How this data was collected? Are those columns really important to measure an accurate popularity of some article? 
+The results demonstrated that in order to have better predictions it's not only needed to have fancy models, but also come back to a better business understanding of my whole dataset. 
+Second, with a diverse and large dataset, like this one, where the observations don't present any sort of "pattern" between them, supervised models like trees tend to perform better than the unsupervised ones, the neural networks. The tree methods are using the entire dataset for evaluation, in contradiction, the neural networks try to learn every time from a small set of data what in this case could show pretty different "patterns" and worse accurate predictions. 
+
+
+
